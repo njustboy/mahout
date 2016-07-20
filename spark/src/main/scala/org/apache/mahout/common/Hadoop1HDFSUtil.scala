@@ -17,11 +17,10 @@
 
 package org.apache.mahout.common
 
-import org.apache.hadoop.io.{Writable, SequenceFile}
-import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.conf.Configuration
-import collection._
-import JavaConversions._
+import org.apache.hadoop.fs.Path
+import org.apache.hadoop.io.{SequenceFile, Writable}
+import org.apache.spark.SparkContext
 
 /**
  * Deprecated Hadoop 1 api which we currently explicitly import via Mahout dependencies. May not work
@@ -29,15 +28,21 @@ import JavaConversions._
  */
 object Hadoop1HDFSUtil extends HDFSUtil {
 
-  
-  def readDrmHeader(path: String): DrmMetadata = {
+
+  /** Read DRM header information off (H)DFS. */
+  override def readDrmHeader(path: String)(implicit sc: SparkContext): DrmMetadata = {
+
     val dfsPath = new Path(path)
-    val fs = dfsPath.getFileSystem(new Configuration())
+
+    val fs = dfsPath.getFileSystem(sc.hadoopConfiguration)
+
+    // Apparently getFileSystem() doesn't set conf??
+    fs.setConf(sc.hadoopConfiguration)
 
     val partFilePath:Path = fs.listStatus(dfsPath)
 
         // Filter out anything starting with .
-        .filter { s => (!s.getPath.getName.startsWith("\\.") && !s.getPath.getName.startsWith("_") && !s.isDir)}
+        .filter { s => !s.getPath.getName.startsWith("\\.") && !s.getPath.getName.startsWith("_") && !s.isDir }
 
         // Take path
         .map(_.getPath)
@@ -60,6 +65,19 @@ object Hadoop1HDFSUtil extends HDFSUtil {
       reader.close()
     }
 
+  }
+
+  /**
+   * Delete a path from the filesystem
+   * @param path
+   */
+  def delete(path: String) {
+    val dfsPath = new Path(path)
+    val fs = dfsPath.getFileSystem(new Configuration())
+
+    if (fs.exists(dfsPath)) {
+      fs.delete(dfsPath, true)
+    }
   }
 
 }

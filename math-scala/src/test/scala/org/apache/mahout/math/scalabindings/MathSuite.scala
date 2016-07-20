@@ -17,16 +17,19 @@
 
 package org.apache.mahout.math.scalabindings
 
-import org.scalatest.{Matchers, FunSuite}
+import org.apache.log4j.Level
+
+import org.apache.mahout.logging._
 import org.apache.mahout.math._
-import scala.math._
-import RLikeOps._
-import scala._
-import scala.util.Random
+import org.apache.mahout.math.scalabindings.RLikeOps._
 import org.apache.mahout.test.MahoutSuite
-import org.apache.mahout.common.RandomUtils
+import org.scalatest.FunSuite
+
+import scala.math._
 
 class MathSuite extends FunSuite with MahoutSuite {
+
+  private final implicit val log = getLog(classOf[MathSuite])
 
   test("chol") {
 
@@ -41,26 +44,26 @@ class MathSuite extends FunSuite with MahoutSuite {
     // make sure it is symmetric for a valid solution
     a := a.t %*% a
 
-    printf("A= \n%s\n", a)
+    trace(s"A= \n$a")
 
     val b = dense((9, 8, 7)).t
 
-    printf("b = \n%s\n", b)
+    trace(s"b = \n$b")
 
-    // fails if chol(a,true)
+    // Fails if chol(a, true)
     val ch = chol(a)
 
-    printf("L = \n%s\n", ch.getL)
+    trace(s"L = \n${ch.getL}")
 
-    printf("(L^-1)b =\n%s\n", ch.solveLeft(b))
+    trace(s"(L^-1)b =\n${ch.solveLeft(b)}\n")
 
     val x = ch.solveRight(eye(3)) %*% ch.solveLeft(b)
 
-    printf("x = \n%s\n", x.toString)
+    trace(s"x = \n$x")
 
     val axmb = (a %*% x) - b
 
-    printf("AX - B = \n%s\n", axmb.toString)
+    trace(s"AX - B = \n$axmb")
 
     axmb.norm should be < 1e-10
 
@@ -88,9 +91,9 @@ class MathSuite extends FunSuite with MahoutSuite {
 
 
     val b = dense(
-      (0.36378319648203084),
-      (0.3627384439613304),
-      (0.2996934112658234))
+      0.36378319648203084,
+      0.3627384439613304,
+      0.2996934112658234)
 
     printf("B=\n%s\n", b)
 
@@ -138,10 +141,10 @@ class MathSuite extends FunSuite with MahoutSuite {
 
   test("solve matrix-matrix") {
     val a = dense((1, 3), (4, 2))
-    val b = dense((11), (14))
+    val b = dense(11, 14)
     val x = solve(a, b)
 
-    val control = dense((2), (3))
+    val control = dense(2, 3)
 
     (control - x).norm should be < 1e-10
   }
@@ -208,6 +211,56 @@ class MathSuite extends FunSuite with MahoutSuite {
 
     (block %*% omega1 - (a %*% omega2)(0 to 0, ::)).norm should be < 1e-7
     (block2 %*% omega1 - (a %*% omega2)(1 to 1, ::)).norm should be < 1e-7
+
+  }
+
+  test("sqDist(X,Y)") {
+    val m = 100
+    val n = 300
+    val d = 7
+    val mxX = Matrices.symmetricUniformView(m, d, 12345).cloned -= 5
+    val mxY = Matrices.symmetricUniformView(n, d, 1234).cloned += 10
+
+    val mxDsq = sqDist(mxX, mxY)
+    val mxDsqControl = new DenseMatrix(m, n) := { (r, c, _) ⇒ (mxX(r, ::) - mxY(c, ::)) ^= 2 sum }
+    (mxDsq - mxDsqControl).norm should be < 1e-7
+  }
+
+  test("sqDist(X)") {
+    val m = 100
+    val d = 7
+    val mxX = Matrices.symmetricUniformView(m, d, 12345).cloned -= 5
+
+    val mxDsq = sqDist(mxX)
+    val mxDsqControl = sqDist(mxX, mxX)
+    (mxDsq - mxDsqControl).norm should be < 1e-7
+  }
+
+  test("sparsity analysis") {
+    setLogLevel(Level.DEBUG)
+
+    val m = 500
+    val n = 800
+    val mxA = new DenseMatrix(m, n)
+
+    densityAnalysis(mxA) shouldBe false
+    densityAnalysis(mxA, .5) shouldBe false
+    densityAnalysis(mxA + 1) shouldBe true
+    densityAnalysis(mxA + 1, .95) shouldBe true
+
+    for (i ← 0 until m by 5) mxA(i, ::) := 1
+    info(s"20% detected as dense?:${densityAnalysis(mxA)}")
+    mxA := 0
+
+    for (i ← 0 until m by 3) mxA(i, ::) := 1
+    info(s"33% detected as dense?:${densityAnalysis(mxA)}")
+    mxA := 0
+
+    for (i ← 0 until m by 4) mxA(i, ::) := 1
+    info(s"25% detected as dense?:${densityAnalysis(mxA)}")
+
+    for (i ← 0 until m by 2) mxA(i, ::) := 1
+    info(s"50% detected as dense?:${densityAnalysis(mxA)}")
 
   }
 

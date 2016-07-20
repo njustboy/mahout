@@ -18,26 +18,57 @@
 package org.apache.mahout.sparkbindings.blas
 
 import org.apache.log4j.Logger
-import scala.reflect.ClassTag
+import org.apache.mahout.sparkbindings.DrmRdd
+import reflect._
 import org.apache.mahout.sparkbindings.drm.DrmRddInput
 import org.apache.mahout.math._
 import scalabindings._
 import RLikeOps._
-import org.apache.mahout.math.drm.logical.OpCbind
-import org.apache.spark.SparkContext._
+import org.apache.mahout.math.drm.logical.{OpCbindScalar, OpCbind}
 
 /** Physical cbind */
 object CbindAB {
 
   private val log = Logger.getLogger(CbindAB.getClass)
 
-  def cbindAB_nograph[K: ClassTag](op: OpCbind[K], srcA: DrmRddInput[K], srcB: DrmRddInput[K]): DrmRddInput[K] = {
+  def cbindAScalar[K](op: OpCbindScalar[K], srcA:DrmRddInput[K]) : DrmRddInput[K] = {
 
-    val a = srcA.toDrmRdd()
-    val b = srcB.toDrmRdd()
+    implicit val ktag = op.keyClassTag
+    val srcRdd = srcA.asRowWise()
+
+    val ncol = op.A.ncol
+    val x = op.x
+
+    val fixedRdd = if (classTag[K] == ClassTag.Int && x != 0.0)
+      fixIntConsistency(op.asInstanceOf[OpCbindScalar[Int]],
+        src = srcRdd.asInstanceOf[DrmRdd[Int]]).asInstanceOf[DrmRdd[K]]
+    else srcRdd
+
+    val left = op.leftBind
+
+    val resultRdd = fixedRdd.map { case (key, vec) =>
+      val newVec = vec.like(ncol + 1)
+      if (left) {
+        newVec(1 to ncol) := vec
+        newVec(0) = x
+      } else {
+        newVec(0 until ncol) := vec
+        newVec(ncol) = x
+      }
+      key -> newVec
+    }
+
+    resultRdd
+  }
+
+  def cbindAB_nograph[K](op: OpCbind[K], srcA: DrmRddInput[K], srcB: DrmRddInput[K]): DrmRddInput[K] = {
+
+    val a = srcA.asRowWise()
+    val b = srcB.asRowWise()
     val n = op.ncol
     val n1 = op.A.ncol
     val n2 = n - n1
+    implicit val ktag = op.keyClassTag
 
     // Check if A and B are identically partitioned AND keyed. if they are, then just perform zip
     // instead of join, and apply the op map-side. Otherwise, perform join and apply the op
@@ -63,7 +94,7 @@ object CbindAB {
       log.debug("applying cbind as join")
 
       a
-          .cogroup(b, numPartitions = a.partitions.size max b.partitions.size)
+          .cogroup(b, numPartitions = a.partitions.length max b.partitions.length)
           .map {
         case (key, (vectorSeqA, vectorSeqB)) =>
 
@@ -88,7 +119,7 @@ object CbindAB {
       }
     }
 
-    new DrmRddInput(rowWiseSrc = Some(op.ncol -> rdd))
+    rdd
 
   }
 

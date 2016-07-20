@@ -17,9 +17,12 @@
 
 package org.apache.mahout.math.scalabindings
 
-import org.apache.mahout.math.{Matrices, QRDecomposition, Vector, Matrix}
+import org.apache.mahout.math.flavor.TraversingStructureEnum
+import org.apache.mahout.math.function.{DoubleFunction, Functions, VectorFunction}
+import org.apache.mahout.math.{Matrices, Matrix, QRDecomposition, Vector}
+
 import scala.collection.JavaConversions._
-import org.apache.mahout.math.function.{DoubleDoubleFunction, VectorFunction, DoubleFunction, Functions}
+import scala.collection._
 import scala.math._
 
 class MatrixOps(val m: Matrix) {
@@ -40,6 +43,10 @@ class MatrixOps(val m: Matrix) {
   def unary_- = cloned.assign(Functions.NEGATE)
 
   def +=(that: Matrix) = m.assign(that, Functions.PLUS)
+
+  def +=:(that:Matrix) = m += that
+
+  def +=:(that:Double) = m += that
 
   def -=(that: Matrix) = m.assign(that, Functions.MINUS)
 
@@ -70,35 +77,41 @@ class MatrixOps(val m: Matrix) {
 
   def -:(that: Double) = that -=: cloned
 
-
-  def norm = sqrt(m.aggregate(Functions.PLUS, Functions.SQUARE))
+  def norm = math.sqrt(m.aggregate(Functions.PLUS, Functions.SQUARE))
 
   def pnorm(p: Int) = pow(m.aggregate(Functions.PLUS, Functions.chain(Functions.ABS, Functions.pow(p))), 1.0 / p)
 
   def apply(row: Int, col: Int) = m.get(row, col)
 
-  def update(row: Int, col: Int, v: Double): Matrix = {
-    m.setQuick(row, col, v);
+  def update(row: Int, col: Int, that: Double): Matrix = {
+    m.setQuick(row, col, that)
     m
   }
+
+  def update(rowRange: Range, colRange: Range, that: Double) = apply(rowRange, colRange) := that
+
+  def update(row: Int, colRange: Range, that: Double) = apply(row, colRange) := that
+
+  def update(rowRange: Range, col: Int, that: Double) = apply(rowRange, col) := that
 
   def update(rowRange: Range, colRange: Range, that: Matrix) = apply(rowRange, colRange) := that
 
   def update(row: Int, colRange: Range, that: Vector) = apply(row, colRange) := that
 
   def update(rowRange: Range, col: Int, that: Vector) = apply(rowRange, col) := that
-
+  
+  
   def apply(rowRange: Range, colRange: Range): Matrix = {
 
     if (rowRange == :: &&
         colRange == ::) return m
 
-    val rr = if (rowRange == ::) (0 until m.nrow)
+    val rr = if (rowRange == ::) 0 until m.nrow
     else rowRange
-    val cr = if (colRange == ::) (0 until m.ncol)
+    val cr = if (colRange == ::) 0 until m.ncol
     else colRange
 
-    return m.viewPart(rr.start, rr.length, cr.start, cr.length)
+    m.viewPart(rr.start, rr.length, cr.start, cr.length)
 
   }
 
@@ -115,10 +128,60 @@ class MatrixOps(val m: Matrix) {
   }
 
   /**
-   * Warning: This provides read-only view only.
+    * Apply a function element-wise without side-effects to the argument (creates a new matrix).
+    *
+    * @param f         element-wise function "value" ⇒ "new value"
+    * @param evalZeros Do we have to process zero elements? true, false, auto: if auto, we will test
+    *                  the supplied function for `f(0) != 0`, and depending on the result, will
+    *                  decide if we want evaluation for zero elements. WARNING: the AUTO setting
+    *                  may not always work correctly for functions that are meant to run in a specific
+    *                  backend context, or non-deterministic functions, such as {-1,0,1} random
+    *                  generators.
+    * @return new DRM with the element-wise function applied.
+    */
+  def apply(f: Double ⇒ Double, evalZeros: AutoBooleanEnum.T): Matrix = {
+    val ezeros = evalZeros match {
+      case AutoBooleanEnum.TRUE ⇒ true
+      case AutoBooleanEnum.FALSE ⇒ false
+      case AutoBooleanEnum.AUTO ⇒ f(0) != 0
+    }
+    if (ezeros) m.cloned := f else m.cloned ::= f
+  }
+
+  /**
+    * Apply a function element-wise without side-effects to the argument (creates a new matrix).
+    *
+    * @param f         element-wise function (row, column, value) ⇒ "new value"
+    * @param evalZeros Do we have to process zero elements? true, false, auto: if auto, we will test
+    *                  the supplied function for `f(0) != 0`, and depending on the result, will
+    *                  decide if we want evaluation for zero elements. WARNING: the AUTO setting
+    *                  may not always work correctly for functions that are meant to run in a specific
+    *                  backend context, or non-deterministic functions, such as {-1,0,1} random
+    *                  generators.
+    * @return new DRM with the element-wise function applied.
+    */
+  def apply(f: (Int, Int, Double) ⇒ Double, evalZeros: AutoBooleanEnum.T): Matrix = {
+    val ezeros = evalZeros match {
+      case AutoBooleanEnum.TRUE ⇒ true
+      case AutoBooleanEnum.FALSE ⇒ false
+      case AutoBooleanEnum.AUTO ⇒ f(0,0,0) != 0
+    }
+    if (ezeros) m.cloned := f else m.cloned ::= f
+  }
+
+  /** A version of function apply with default AUTO treatment of `evalZeros`. */
+  def apply(f: Double ⇒ Double): Matrix = apply(f, AutoBooleanEnum.AUTO)
+
+  /** A version of function apply with default AUTO treatment of `evalZeros`. */
+  def apply(f: (Int, Int, Double) ⇒ Double): Matrix = apply(f, AutoBooleanEnum.AUTO)
+
+
+  /**
+    * Warning: This provides read-only view only.
    * In most cases that's what one wants. To get a copy,
    * use <code>m.t cloned</code>
-   * @return transposed view
+    *
+    * @return transposed view
    */
   def t = Matrices.transposedView(m)
 
@@ -130,7 +193,8 @@ class MatrixOps(val m: Matrix) {
 
   /**
    * Assigning from a row-wise collection of vectors
-   * @param that
+    *
+    * @param that -
    */
   def :=(that: TraversableOnce[Vector]) = {
     var row = 0
@@ -140,26 +204,78 @@ class MatrixOps(val m: Matrix) {
     })
   }
 
+  def :=(that: Double) = m.assign(that)
+
   def :=(f: (Int, Int, Double) => Double): Matrix = {
-    for (r <- 0 until nrow; c <- 0 until ncol) m(r, c) = f(r, c, m(r, c))
+    import RLikeOps._
+    m.getFlavor.getStructure match {
+      case TraversingStructureEnum.COLWISE | TraversingStructureEnum.SPARSECOLWISE =>
+        for (col <- t; el <- col.all) el := f(el.index, col.index, el)
+      case default =>
+        for (row <- m; el <- row.all) el := f(row.index, el.index, el)
+    }
     m
   }
 
-  def cloned: Matrix = m.like := m
+  /** Functional assign with (Double) => Double */
+  def :=(f: (Double) => Double): Matrix = {
+    import RLikeOps._
+    m.getFlavor.getStructure match {
+      case TraversingStructureEnum.COLWISE | TraversingStructureEnum.SPARSECOLWISE =>
+        for (col <- t; el <- col.all) el := f(el)
+      case default =>
+        for (row <- m; el <- row.all) el := f(el)
+    }
+    m
+  }
+
+  /** Sparse assign: iterate and assign over non-zeros only */
+  def ::=(f: (Int, Int, Double) => Double): Matrix = {
+
+    import RLikeOps._
+
+    m.getFlavor.getStructure match {
+      case TraversingStructureEnum.COLWISE | TraversingStructureEnum.SPARSECOLWISE =>
+        for (col <- t; el <- col.nonZeroes) el := f(el.index, col.index, el)
+      case default =>
+        for (row <- m; el <- row.nonZeroes) el := f(row.index, el.index, el)
+    }
+    m
+  }
+
+  /** Sparse function assign: iterate and assign over non-zeros only */
+  def ::=(f: (Double) => Double): Matrix = {
+
+    import RLikeOps._
+
+    m.getFlavor.getStructure match {
+      case TraversingStructureEnum.COLWISE | TraversingStructureEnum.SPARSECOLWISE =>
+        for (col <- t; el <- col.nonZeroes) el := f(el)
+      case default =>
+        for (row <- m; el <- row.nonZeroes) el := f(el)
+    }
+    m
+  }
+
+    def cloned: Matrix = m.like := m
 
   /**
    * Ideally, we would probably want to override equals(). But that is not
    * possible without modifying AbstractMatrix implementation in Mahout
    * which would require discussion at Mahout team.
-   * @param that
+    *
+    * @param that
    * @return
    */
   def equiv(that: Matrix) =
+
+  // Warning: TODO: This would actually create empty objects in SparseMatrix. Should really implement
+  // merge-type comparison strategy using iterateNonEmpty.
     that != null &&
-        nrow == that.nrow &&
-        m.view.zip(that).forall(t => {
-          t._1.equiv(t._2)
-        })
+      nrow == that.nrow &&
+      m.view.zip(that).forall(t => {
+        t._1.equiv(t._2)
+      })
 
   def nequiv(that: Matrix) = !equiv(that)
 
@@ -169,7 +285,8 @@ class MatrixOps(val m: Matrix) {
 
   /**
    * test if rank == min(nrow,ncol).
-   * @return
+    *
+    * @return
    */
   def isFullRank: Boolean =
     new QRDecomposition(if (nrow < ncol) m t else m cloned).hasFullRank

@@ -19,13 +19,29 @@ package org.apache.mahout.math
 
 import org.apache.mahout.math.solver.EigenDecomposition
 
+import collection._
+import scala.util.Random
+
 /**
  * Mahout matrices and vectors' scala syntactic sugar
  */
 package object scalabindings {
 
+
   // Reserved "ALL" range
   final val `::`: Range = null
+
+  // values for stochastic sparsityAnalysis
+  final val z95 = 1.959964
+  final val z80 = 1.281552
+  final val maxSamples = 500
+  final val minSamples = 15
+
+  // Some enums
+  object AutoBooleanEnum extends Enumeration {
+    type T = Value
+    val TRUE, FALSE, AUTO = Value
+  }
 
   implicit def seq2Vector(s: TraversableOnce[AnyVal]) =
     new DenseVector(s.map(_.asInstanceOf[Number].doubleValue()).toArray)
@@ -122,34 +138,34 @@ package object scalabindings {
    */
   def dense[R](rows: R*): DenseMatrix = {
     import RLikeOps._
-    val data = for (r <- rows) yield {
+    val data = for (r ← rows) yield {
       r match {
-        case n: Number => Array(n.doubleValue())
-        case t: Product => t.productIterator.map(_.asInstanceOf[Number].doubleValue()).toArray
-        case t: Vector => Array.tabulate(t.length)(t(_))
-        case t: Array[Double] => t
-        case t: Iterable[_] =>
+        case n: Number ⇒ Array(n.doubleValue())
+        case t: Vector ⇒ Array.tabulate(t.length)(t(_))
+        case t: Array[Double] ⇒ t
+        case t: Iterable[_] ⇒
           t.head match {
-            case ss: Double => t.asInstanceOf[Iterable[Double]].toArray
-            case vv: Vector =>
+            case ss: Double ⇒ t.asInstanceOf[Iterable[Double]].toArray
+            case vv: Vector ⇒
               val m = new DenseMatrix(t.size, t.head.asInstanceOf[Vector].length)
               t.asInstanceOf[Iterable[Vector]].view.zipWithIndex.foreach {
-                case (v, idx) => m(idx, ::) := v
+                case (v, idx) ⇒ m(idx, ::) := v
               }
               return m
           }
-        case t: Array[Array[Double]] => if (rows.size == 1)
+        case t: Product ⇒ t.productIterator.map(_.asInstanceOf[Number].doubleValue()).toArray
+        case t: Array[Array[Double]] ⇒ if (rows.size == 1)
           return new DenseMatrix(t)
         else
           throw new IllegalArgumentException(
             "double[][] data parameter can be the only argument for dense()")
-        case t: Array[Vector] =>
+        case t: Array[Vector] ⇒
           val m = new DenseMatrix(t.size, t.head.length)
           t.view.zipWithIndex.foreach {
-            case (v, idx) => m(idx, ::) := v
+            case (v, idx) ⇒ m(idx, ::) := v
           }
           return m
-        case _ => throw new IllegalArgumentException("unsupported type in the inline Matrix initializer")
+        case _ ⇒ throw new IllegalArgumentException("unsupported type in the inline Matrix initializer")
       }
     }
     new DenseMatrix(data.toArray)
@@ -164,7 +180,7 @@ package object scalabindings {
    *   (0,5)::(9,3)::Nil,
    *   (2,3.5)::(7,8)::Nil
    * )
-   * 
+   *
    * }}}
    *
    * @param rows
@@ -172,25 +188,40 @@ package object scalabindings {
    */
 
   def sparse(rows: Vector*): SparseRowMatrix = {
-    import MatrixOps._
+    import RLikeOps._
     val nrow = rows.size
     val ncol = rows.map(_.size()).max
     val m = new SparseRowMatrix(nrow, ncol)
-    m := rows
+    m := rows.map { row ⇒
+      if (row.length < ncol) {
+        val newRow = row.like(ncol)
+        newRow(0 until row.length) := row
+        newRow
+      }
+      else row
+    }
     m
 
   }
 
   /**
    * create a sparse vector out of list of tuple2's
-   * @param sdata
+   * @param sdata cardinality
    * @return
    */
-  def svec(sdata: TraversableOnce[(Int, AnyVal)]) = {
-    val cardinality = if (sdata.size > 0) sdata.map(_._1).max + 1 else 0
+  def svec(sdata: TraversableOnce[(Int, AnyVal)], cardinality: Int = -1) = {
+    val required = if (sdata.nonEmpty) sdata.map(_._1).max + 1 else 0
+    var tmp = -1
+    if (cardinality < 0) {
+      tmp = required
+    } else if (cardinality < required) {
+      throw new IllegalArgumentException(s"Required cardinality %required but got %cardinality")
+    } else {
+      tmp = cardinality
+    }
     val initialCapacity = sdata.size
-    val sv = new RandomAccessSparseVector(cardinality, initialCapacity)
-    sdata.foreach(t => sv.setQuick(t._1, t._2.asInstanceOf[Number].doubleValue()))
+    val sv = new RandomAccessSparseVector(tmp, initialCapacity)
+    sdata.foreach(t ⇒ sv.setQuick(t._1, t._2.asInstanceOf[Number].doubleValue()))
     sv
   }
 
@@ -249,23 +280,23 @@ package object scalabindings {
     (qrdec.getQ, qrdec.getR)
   }
 
- /**
-  * Solution <tt>X</tt> of <tt>A*X = B</tt> using QR-Decomposition, where <tt>A</tt> is a square, non-singular matrix.
+  /**
+   * Solution <tt>X</tt> of <tt>A*X = B</tt> using QR-Decomposition, where <tt>A</tt> is a square, non-singular matrix.
    *
    * @param a
    * @param b
    * @return (X)
    */
   def solve(a: Matrix, b: Matrix): Matrix = {
-   import MatrixOps._
-   if (a.nrow != a.ncol) {
-     throw new IllegalArgumentException("supplied matrix A is not square")
-   }
-   val qr = new QRDecomposition(a cloned)
-   if (!qr.hasFullRank) {
-     throw new IllegalArgumentException("supplied matrix A is singular")
-   }
-   qr.solve(b)
+    import MatrixOps._
+    if (a.nrow != a.ncol) {
+      throw new IllegalArgumentException("supplied matrix A is not square")
+    }
+    val qr = new QRDecomposition(a cloned)
+    if (!qr.hasFullRank) {
+      throw new IllegalArgumentException("supplied matrix A is singular")
+    }
+    qr.solve(b)
   }
 
   /**
@@ -292,6 +323,152 @@ package object scalabindings {
     val x = solve(a, b.toColMatrix)
     x(::, 0)
   }
+
+  ///////////////////////////////////////////////////////////
+  // Elementwise unary functions. Actually this requires creating clones to avoid side effects. For
+  // efficiency reasons one may want to actually do in-place exression assignments instead, e.g.
+  //
+  // m := exp _
+
+  import RLikeOps._
+  import scala.math._
+
+  def mexp(m: Matrix): Matrix = m.cloned := exp _
+
+  def vexp(v: Vector): Vector = v.cloned := exp _
+
+  def mlog(m: Matrix): Matrix = m.cloned := log _
+
+  def vlog(v: Vector): Vector = v.cloned := log _
+
+  def mabs(m: Matrix): Matrix = m.cloned ::= (abs(_: Double))
+
+  def vabs(v: Vector): Vector = v.cloned ::= (abs(_: Double))
+
+  def msqrt(m: Matrix): Matrix = m.cloned ::= sqrt _
+
+  def vsqrt(v: Vector): Vector = v.cloned ::= sqrt _
+
+  def msignum(m: Matrix): Matrix = m.cloned ::= (signum(_: Double))
+
+  def vsignum(v: Vector): Vector = v.cloned ::= (signum(_: Double))
+
+  //////////////////////////////////////////////////////////
+  // operation funcs
+
+
+  /** Matrix-matrix unary func */
+  type MMUnaryFunc = (Matrix, Option[Matrix]) ⇒ Matrix
+  /** Binary matrix-matrix operations which may save result in-place, optionally */
+  type MMBinaryFunc = (Matrix, Matrix, Option[Matrix]) ⇒ Matrix
+  type MVBinaryFunc = (Matrix, Vector, Option[Matrix]) ⇒ Matrix
+  type VMBinaryFunc = (Vector, Matrix, Option[Matrix]) ⇒ Matrix
+  type MDBinaryFunc = (Matrix, Double, Option[Matrix]) ⇒ Matrix
+
+
+  /////////////////////////////////////
+  // Miscellaneous in-core utilities
+
+  /**
+   * Compute column-wise means and variances.
+   *
+   * @return colMeans → colVariances
+   */
+  def colMeanVars(mxA:Matrix): (Vector, Vector) = {
+    val mu = mxA.colMeans()
+    val variance = (mxA * mxA colMeans) -= mu ^ 2
+    mu → variance
+  }
+
+  /**
+   * Compute column-wise means and stdevs.
+   * @param mxA input
+   * @return colMeans → colStdevs
+   */
+  def colMeanStdevs(mxA:Matrix) = {
+    val (mu, variance) = colMeanVars(mxA)
+    mu → (variance ::= math.sqrt _)
+  }
+
+  /** Compute square distance matrix. We assume data points are row-wise, similar to R's dist(). */
+  def sqDist(mxX: Matrix): Matrix = {
+
+    val s = mxX ^ 2 rowSums
+
+    (mxX %*% mxX.t) := { (r, c, x) ⇒ s(r) + s(c) - 2 * x}
+  }
+
+  /**
+   * Pairwise squared distance computation.
+   * @param mxX X, m x d
+   * @param mxY Y, n x d
+   * @return pairwise squaired distances of row-wise data points in X and Y (m x n)
+   */
+  def sqDist(mxX: Matrix, mxY: Matrix): Matrix = {
+
+    val s = mxX ^ 2 rowSums
+
+    val t = mxY ^ 2 rowSums
+
+    // D = s*1' + 1*t' - 2XY'
+    (mxX %*% mxY.t) := { (r, c, d) ⇒ s(r) + t(c) - 2.0 * d}
+  }
+
+  def dist(mxX: Matrix): Matrix = sqDist(mxX) := sqrt _
+
+  def dist(mxX: Matrix, mxY: Matrix): Matrix = sqDist(mxX, mxY) := sqrt _
+
+  /**
+    * Check the density of an in-core matrix based on supplied criteria.
+    * Returns true if we think mx is densier than threshold with at least 80% confidence.
+    *
+    * @param mx  The matrix to check density of.
+    * @param threshold the threshold of non-zero elements above which we consider a Matrix Dense
+    */
+  def densityAnalysis(mx: Matrix, threshold: Double = 0.25): Boolean = {
+
+    require(threshold >= 0.0 && threshold <= 1.0)
+    var n = minSamples
+    var mean = 0.0
+    val rnd = new Random()
+    val dimm = mx.nrow
+    val dimn = mx.ncol
+    val pq = threshold * (1 - threshold)
+
+    for (s ← 0 until minSamples) {
+      if (mx(rnd.nextInt(dimm), rnd.nextInt(dimn)) != 0.0) mean += 1
+    }
+    mean /= minSamples
+    val iv = z80 * math.sqrt(pq / n)
+
+    if (mean < threshold - iv) return false // sparse
+    else if (mean > threshold + iv) return true // dense
+
+    while (n < maxSamples) {
+      // Determine upper bound we may need for n to likely relinquish the uncertainty. Here, we use
+      // confidence interval formula but solved for n.
+      val ivNeeded = math.abs(threshold - mean) max 1e-11
+
+      val stderr = ivNeeded / z80
+      val nNeeded = (math.ceil(pq / (stderr * stderr)).toInt max n min maxSamples) - n
+
+      var meanNext = 0.0
+      for (s ← 0 until nNeeded) {
+        if (mx(rnd.nextInt(dimm), rnd.nextInt(dimn)) != 0.0) meanNext += 1
+      }
+      mean = (n * mean + meanNext) / (n + nNeeded)
+      n += nNeeded
+
+      // Are we good now?
+      val iv = z80 * math.sqrt(pq / n)
+      if (mean < threshold - iv) return false // sparse
+      else if (mean > threshold + iv) return true // dense
+    }
+
+    return mean > threshold // if (mean > threshold) dense
+
+  }
+
 
 
 }

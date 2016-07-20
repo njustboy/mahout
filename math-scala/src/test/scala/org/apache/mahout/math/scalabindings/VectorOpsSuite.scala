@@ -18,9 +18,11 @@
 package org.apache.mahout.math.scalabindings
 
 import org.scalatest.FunSuite
-import org.apache.mahout.math.{RandomAccessSparseVector, Vector}
+import org.apache.mahout.math.{SequentialAccessSparseVector, RandomAccessSparseVector, Vector}
 import RLikeOps._
 import org.apache.mahout.test.MahoutSuite
+
+import scala.util.Random
 
 /** VectorOps Suite */
 class VectorOpsSuite extends FunSuite with MahoutSuite {
@@ -30,11 +32,22 @@ class VectorOpsSuite extends FunSuite with MahoutSuite {
     val sparseVec = svec((5 -> 1) :: (10 -> 2.0) :: Nil)
     println(sparseVec)
 
+    assert(sparseVec.size() == 11)
+
     val sparseVec2: Vector = (5 -> 1.0) :: (10 -> 2.0) :: Nil
     println(sparseVec2)
 
     val sparseVec3: Vector = new RandomAccessSparseVector(100) := (5 -> 1.0) :: Nil
     println(sparseVec3)
+
+    val sparseVec4 = svec((5 -> 1) :: (10 -> 2.0) :: Nil, 100)
+    println(sparseVec4)
+
+    assert(sparseVec4.size() == 100)
+
+    intercept[IllegalArgumentException] {
+      val sparseVec5 = svec((5 -> 1) :: (10 -> 2.0) :: Nil, 10)  
+    }
 
     val denseVec1: Vector = (1.0, 1.1, 1.2)
     println(denseVec1)
@@ -76,6 +89,21 @@ class VectorOpsSuite extends FunSuite with MahoutSuite {
     10 + a shouldBe 10 +: a
     10 - a shouldBe 10 -: a
     10 / a shouldBe 10 /: a
+
+  }
+
+  test("sparse assignment") {
+
+    val svec = new SequentialAccessSparseVector(30)
+    svec(1) = -0.5
+    svec(3) = 0.5
+    println(svec)
+
+    svec(1 until svec.length) ::= ( _ => 0)
+    println(svec)
+
+    svec.sum shouldBe 0
+
 
   }
 

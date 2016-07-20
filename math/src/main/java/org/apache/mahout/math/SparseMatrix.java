@@ -17,34 +17,49 @@
 
 package org.apache.mahout.math;
 
-import com.google.common.collect.AbstractIterator;
-import org.apache.mahout.math.function.DoubleDoubleFunction;
-import org.apache.mahout.math.function.Functions;
-import org.apache.mahout.math.function.IntObjectProcedure;
-import org.apache.mahout.math.list.IntArrayList;
-import org.apache.mahout.math.map.OpenIntObjectHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap.Entry;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
 
 import java.util.Iterator;
 import java.util.Map;
 
+import org.apache.mahout.math.flavor.MatrixFlavor;
+import org.apache.mahout.math.function.DoubleDoubleFunction;
+import org.apache.mahout.math.function.Functions;
+import org.apache.mahout.math.list.IntArrayList;
+
+import com.google.common.collect.AbstractIterator;
+
 /** Doubly sparse matrix. Implemented as a Map of RandomAccessSparseVector rows */
 public class SparseMatrix extends AbstractMatrix {
 
-  private OpenIntObjectHashMap<Vector> rowVectors;
+  private Int2ObjectOpenHashMap<Vector> rowVectors;
   
   /**
    * Construct a matrix of the given cardinality with the given row map
    *
-   * @param rows
-   *          a Map<Integer, RandomAccessSparseVector> of rows
-   * @param columns
-   * @param rowVectors
+   * @param rows no of rows
+   * @param columns no of columns
+   * @param rowVectors a Map<Integer, RandomAccessSparseVector> of rows
    */
-  public SparseMatrix(int rows, int columns, Map<Integer, RandomAccessSparseVector> rowVectors) {
+  public SparseMatrix(int rows, int columns, Map<Integer, Vector> rowVectors) {
+    this(rows, columns, rowVectors, false);
+  }
+
+  public SparseMatrix(int rows, int columns, Map<Integer, Vector> rowVectors, boolean shallow) {
+
+    // Why this is passing in a map? iterating it is pretty inefficient as opposed to simple lists...
     super(rows, columns);
-    this.rowVectors = new OpenIntObjectHashMap<Vector>();
-    for (Map.Entry<Integer, RandomAccessSparseVector> entry : rowVectors.entrySet()) {
-      this.rowVectors.put(entry.getKey(), entry.getValue().clone());
+    this.rowVectors = new Int2ObjectOpenHashMap<>();
+    if (shallow) {
+      for (Map.Entry<Integer, Vector> entry : rowVectors.entrySet()) {
+        this.rowVectors.put(entry.getKey().intValue(), entry.getValue());
+      }
+    } else {
+      for (Map.Entry<Integer, Vector> entry : rowVectors.entrySet()) {
+        this.rowVectors.put(entry.getKey().intValue(), entry.getValue().clone());
+      }
     }
   }
   
@@ -53,7 +68,7 @@ public class SparseMatrix extends AbstractMatrix {
    */
   public SparseMatrix(int rows, int columns) {
     super(rows, columns);
-    this.rowVectors = new OpenIntObjectHashMap<Vector>();
+    this.rowVectors = new Int2ObjectOpenHashMap<>();
   }
 
   @Override
@@ -66,9 +81,12 @@ public class SparseMatrix extends AbstractMatrix {
   }
 
   @Override
-  public Iterator<MatrixSlice> iterator() {
-    final IntArrayList keys = new IntArrayList(rowVectors.size());
-    rowVectors.keys(keys);
+  public int numSlices() {
+    return rowVectors.size();
+  }
+
+  public Iterator<MatrixSlice> iterateNonEmpty() {
+    final int[] keys = rowVectors.keySet().toIntArray();
     return new AbstractIterator<MatrixSlice>() {
       private int slice;
       @Override
@@ -76,7 +94,7 @@ public class SparseMatrix extends AbstractMatrix {
         if (slice >= rowVectors.size()) {
           return endOfData();
         }
-        int i = keys.get(slice);
+        int i = keys[slice];
         Vector row = rowVectors.get(i);
         slice++;
         return new MatrixSlice(row, i);
@@ -151,18 +169,17 @@ public class SparseMatrix extends AbstractMatrix {
       }
 
       SparseMatrix otherSparse = (SparseMatrix) other;
-      otherSparse.rowVectors.forEachPair(new IntObjectProcedure<Vector>() {
-        @Override
-        public boolean apply(int rowIndex, Vector otherRow) {
-          Vector row = rowVectors.get(rowIndex);
-          if (row == null) {
-            rowVectors.put(rowIndex, otherRow.clone());
-          } else {
-            row.assign(otherRow, Functions.PLUS);
-          }
-          return true;
+      for(ObjectIterator<Entry<Vector>> fastIterator = otherSparse.rowVectors.int2ObjectEntrySet().fastIterator();
+              fastIterator.hasNext();) {
+        final Entry<Vector> entry = fastIterator.next();
+        final int rowIndex = entry.getIntKey();
+        Vector row = rowVectors.get(rowIndex);
+        if (row == null) {
+          rowVectors.put(rowIndex, entry.getValue().clone());
+        } else {
+          row.assign(entry.getValue(), Functions.PLUS);
         }
-      });
+      }
       return this;
     } else {
       return super.assign(other, function);
@@ -218,7 +235,11 @@ public class SparseMatrix extends AbstractMatrix {
 
   /** special method necessary for efficient serialization */
   public IntArrayList nonZeroRowIndices() {
-    return rowVectors.keys();
+    return new IntArrayList(rowVectors.keySet().toIntArray());
   }
 
+  @Override
+  public MatrixFlavor getFlavor() {
+    return MatrixFlavor.SPARSEROWLIKE;
+  }
 }

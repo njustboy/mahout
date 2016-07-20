@@ -18,7 +18,6 @@
 package org.apache.mahout.sparkbindings.blas
 
 import org.apache.log4j.Logger
-import scala.reflect.ClassTag
 import org.apache.mahout.sparkbindings.drm.DrmRddInput
 import org.apache.mahout.math.drm.logical.OpRbind
 
@@ -27,23 +26,25 @@ object RbindAB {
 
   private val log = Logger.getLogger(RbindAB.getClass)
 
-  def rbindAB[K: ClassTag](op: OpRbind[K], srcA: DrmRddInput[K], srcB: DrmRddInput[K]): DrmRddInput[K] = {
+  def rbindAB[K](op: OpRbind[K], srcA: DrmRddInput[K], srcB: DrmRddInput[K]): DrmRddInput[K] = {
+
+    implicit val ktag = op.keyClassTag
 
     // If any of the inputs is blockified, use blockified inputs
     if (srcA.isBlockified || srcB.isBlockified) {
-      val a = srcA.toBlockifiedDrmRdd()
-      val b = srcB.toBlockifiedDrmRdd()
+      val a = srcA.asBlockified(op.A.ncol)
+      val b = srcB.asBlockified(op.B.ncol)
 
       // Union seems to be fine, it is indeed just do partition-level unionization, no shuffles
-      new DrmRddInput(blockifiedSrc = Some(a ++ b))
+      a ++ b
 
     } else {
 
       // Otherwise, use row-wise inputs -- no reason to blockify here.
-      val a = srcA.toDrmRdd()
-      val b = srcB.toDrmRdd()
+      val a = srcA.asRowWise()
+      val b = srcB.asRowWise()
 
-      new DrmRddInput(rowWiseSrc = Some(op.ncol -> (a ++ b)))
+      a ++ b
     }
   }
 }

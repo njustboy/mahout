@@ -17,20 +17,21 @@
 
 package org.apache.mahout.sparkbindings.blas
 
-import scala.reflect.ClassTag
 import org.apache.mahout.math.scalabindings._
 import RLikeOps._
 import org.apache.mahout.math.{SequentialAccessSparseVector, DenseVector}
 import org.apache.mahout.sparkbindings.DrmRdd
 
-class DrmRddOps[K: ClassTag](private[blas] val rdd: DrmRdd[K]) {
+class DrmRddOps[K](private[blas] val rdd: DrmRdd[K]) {
 
+  /** Turn RDD into dense row-wise vectors if density threshold is exceeded. */
   def densify(threshold: Double = 0.80): DrmRdd[K] = rdd.map({
     case (key, v) =>
       val vd = if (!v.isDense && v.getNumNonZeroElements > threshold * v.length) new DenseVector(v) else v
       key -> vd
   })
 
+  /** Turn rdd into sparse RDD if density threshold is underrun. */
   def sparsify(threshold: Double = 0.80): DrmRdd[K] = rdd.map({
     case (key, v) =>
       val vs = if (v.isDense() && v.getNumNonZeroElements <= threshold * v.length)
